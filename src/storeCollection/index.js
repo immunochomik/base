@@ -2,13 +2,6 @@ var PouchDB = require('pouchdb');
 PouchDB.plugin(require('pouchdb-quick-search/lib'));
 var _ = require('lodash');
 
-function myDeltaFunction(doc) {
-  doc.counter = doc.counter || 0;
-  doc.counter++;
-  return doc;
-}
-
-
 var Collection = (function() {
   function Collection(name) {
     this.db = new PouchDB(name);
@@ -23,24 +16,28 @@ var Collection = (function() {
   Collection.prototype.put = function(doc) {
     return this.db.put(doc);
   };
-  Collection.prototype.update = function(item) {
-    if(!item._rev && item._id) {
-      this.db.get(item._id).then(res => {
-        item._rev = res._rev;
-        this.db.put(item).then(res => {
-          console.log('Update', res);
-        }).catch(err => {
-          console.log('U Error', err);
-        });
-      }).catch(err => {
-        this.db.put(item);
-      });
-    } else {
-      return this.db.put(item);
-    }
+  Collection.prototype.upsert = function(item, callback) {
+    this.db.get(item._id).then(res => {
+      item._rev = res._rev;
+      this.db.put(item, callback);
+    }).catch(err => {
+      if (err.name === 'not_found') {
+        this.db.put(item, callback);
+      } else {
+        console.log(err);
+      }
+    });
   };
-  Collection.prototype.get = function(id) {
-    return this.db.get(id);
+  Collection.prototype.get = function(id, callback) {
+    var promise = this.db.get(id);
+    if(! callback) {
+      return promise;
+    }
+    promise.then(res => {
+      callback(res);
+    }).catch(err => {
+        console.log('Error', err);
+    });
   };
   Collection.prototype.query = function(index, criteria) {
     return this.db.query(index, criteria);
@@ -80,27 +77,27 @@ var Collection = (function() {
   Collection.prototype.remove = function(item) {
     return this.db.remove(item);
   };
-
-  Collection.prototype.removeById = function(id) {
+  Collection.prototype.removeById = function(id, callback) {
     var self = this;
     this.db.get(id).then(doc => {
-      return self.db.remove(doc);
+      self.db.remove(doc);
+    }).then(_ => {
+      callback && callback();
     }).catch(err => {
       console.log('Error', err);
     });
   };
   Collection.prototype.init = function(ddoc) {
-    var promiss = this.update(ddoc);
-    if(promiss) {
-      promiss.then(res => {
+    var promise = this.update(ddoc);
+    if(promise) {
+      promise.then(res => {
         console.log(res);
       }).catch(err => {
         console.log('Error', err);
       });
     }
   };
-  Collection.prototype.ensureIndexes = function(ddoc)
-  {
+  Collection.prototype.ensureIndexes = function(ddoc) {
       var self = this;
       this.get('_design/index').then(res => {
           //if there than do nothing
